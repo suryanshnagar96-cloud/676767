@@ -1,0 +1,1 @@
+import{NextResponse}from'next/server';import{getDefaultUser,getTwitterTokenByUserId}from'@/lib/supabase';import{tweetMaxChars}from'@/lib/types';export async function GET(){const u=await getDefaultUser(),t=await getTwitterTokenByUserId(u.id);return NextResponse.json({connected:!!t,isPremium:t?.isPremium??false,maxCharsPerTweet:tweetMaxChars(t?.isPremium)})}
