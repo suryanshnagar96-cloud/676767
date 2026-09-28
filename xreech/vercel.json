@@ -1,11 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "crons": [
-    {"path": "/api/workers/auto-dm", "schedule": "*/3 * * * *"}
-  ],
   "functions": {
-    "src/app/api/workers/auto-dm/route.ts": {"maxDuration": 60},
-    "src/app/api/workers/scheduler/route.ts": {"maxDuration": 60},
     "src/app/api/posts/route.ts": {"maxDuration": 30},
     "src/app/api/posts/[id]/publish/route.ts": {"maxDuration": 30}
   }
