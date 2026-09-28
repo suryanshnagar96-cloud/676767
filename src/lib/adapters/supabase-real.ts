@@ -1,4 +1,34 @@
-// Production adapter placeholder. Keep the same API surface while the Supabase-specific
-// implementation is wired in. Set NEXT_PUBLIC_SUPABASE_URL only after replacing this
-// adapter with the Postgres implementation.
-export * from './supabase-prisma';
+import {createClient} from '@supabase/supabase-js';
+import {encrypt,decrypt} from '@/lib/crypto';
+import type {User,TwitterToken,ScheduledPost,AutoDmCampaign,DmLog} from '@/lib/types';
+const url=process.env.SUPABASE_URL??process.env.NEXT_PUBLIC_SUPABASE_URL;
+const key=process.env.SUPABASE_SERVICE_ROLE_KEY;
+if(!url||!key) throw new Error('Missing SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+const db=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
+const user=(r:any):User=>({id:r.id,email:r.email,createdAt:new Date(r.created_at)});
+const token=(r:any):TwitterToken=>({...r,id:r.id,userId:r.user_id,twitterUserId:r.twitter_user_id,accessToken:decrypt(r.access_token),refreshToken:decrypt(r.refresh_token),expiresAt:new Date(r.expires_at),scope:r.scope,isPremium:r.is_premium,createdAt:new Date(r.created_at),updatedAt:new Date(r.updated_at)});
+const post=(r:any):ScheduledPost=>({...r,id:r.id,userId:r.user_id,content:r.content,scheduledAt:new Date(r.scheduled_at),status:r.status,xTweetId:r.x_tweet_id,errorMessage:r.error_message,createdAt:new Date(r.created_at),updatedAt:new Date(r.updated_at)});
+export async function findOrCreateUserByEmail(email:string):Promise<User>{const q=await db.from('users').upsert({email},{onConflict:'email'}).select('*').single();if(q.error)throw q.error;return user(q.data)}
+export async function getUserById(id:string){const q=await db.from('users').select('*').eq('id',id).maybeSingle();if(q.error)throw q.error;return q.data?user(q.data):null}
+export async function getDefaultUser(){return findOrCreateUserByEmail(process.env.DEFAULT_USER_EMAIL??'demo@xreech.local')}
+export async function saveTwitterToken(i:any){const q=await db.from('twitter_tokens').upsert({user_id:i.userId,twitter_user_id:i.twitterUserId,access_token:encrypt(i.accessToken),refresh_token:encrypt(i.refreshToken),expires_at:i.expiresAt.toISOString(),scope:i.scope??null,is_premium:i.isPremium??false},{onConflict:'user_id,twitter_user_id'}).select('*').single();if(q.error)throw q.error;return token(q.data)}
+export async function setTwitterPremiumStatus(userId:string,isPremium:boolean){const q=await db.from('twitter_tokens').update({is_premium:isPremium}).eq('user_id',userId).select('*').order('updated_at',{ascending:false}).limit(1).maybeSingle();if(q.error)throw q.error;return q.data?token(q.data):null}
+export async function getTwitterTokenByUserId(userId:string){const q=await db.from('twitter_tokens').select('*').eq('user_id',userId).order('updated_at',{ascending:false}).limit(1).maybeSingle();if(q.error)throw q.error;return q.data?token(q.data):null}
+export async function deleteTwitterTokenByUserId(userId:string){const q=await db.from('twitter_tokens').delete().eq('user_id',userId);if(q.error)throw q.error}
+export async function createScheduledPost(i:any){const q=await db.from('scheduled_posts').insert({user_id:i.userId,content:i.content,scheduled_at:i.scheduledAt.toISOString(),status:i.status??'PENDING',x_tweet_id:i.xTweetId??null,error_message:i.errorMessage??null}).select('*').single();if(q.error)throw q.error;return post(q.data)}
+export async function getScheduledPost(id:string){const q=await db.from('scheduled_posts').select('*').eq('id',id).maybeSingle();if(q.error)throw q.error;return q.data?post(q.data):null}
+export async function listScheduledPostsByUser(userId:string){const q=await db.from('scheduled_posts').select('*').eq('user_id',userId).order('created_at',{ascending:false});if(q.error)throw q.error;return (q.data??[]).map(post)}
+export async function updateScheduledPost(id:string,p:any){const d:any={updated_at:new Date().toISOString()};if(p.status!==undefined)d.status=p.status;if(p.xTweetId!==undefined)d.x_tweet_id=p.xTweetId;if(p.errorMessage!==undefined)d.error_message=p.errorMessage;if(p.content!==undefined)d.content=p.content;if(p.scheduledAt!==undefined)d.scheduled_at=p.scheduledAt.toISOString();const q=await db.from('scheduled_posts').update(d).eq('id',id).select('*').single();if(q.error)throw q.error;return post(q.data)}
+export async function deleteScheduledPost(id:string){const q=await db.from('scheduled_posts').delete().eq('id',id);if(q.error)throw q.error}
+export async function createAutoDmCampaign(i:any){const q=await db.from('auto_dm_campaigns').insert({user_id:i.userId,parent_tweet_id:i.parentTweetId,trigger_keyword:i.triggerKeyword,dm_message:i.dmMessage,is_active:i.isActive??true,scheduled_post_id:i.scheduledPostId??null}).select('*').single();if(q.error)throw q.error;return q.data}
+export async function getAutoDmCampaign(id:string){const q=await db.from('auto_dm_campaigns').select('*').eq('id',id).maybeSingle();if(q.error)throw q.error;return q.data}
+export async function listAutoDmCampaignsByUser(userId:string){const q=await db.from('auto_dm_campaigns').select('*').eq('user_id',userId).order('created_at',{ascending:false});if(q.error)throw q.error;return q.data??[]}
+export async function listActiveAutoDmCampaigns(){const q=await db.from('auto_dm_campaigns').select('*').eq('is_active',true);if(q.error)throw q.error;return q.data??[]}
+export async function updateAutoDmCampaign(id:string,p:any){const d:any={updated_at:new Date().toISOString()};if(p.isActive!==undefined)d.is_active=p.isActive;if(p.triggerKeyword!==undefined)d.trigger_keyword=p.triggerKeyword;if(p.dmMessage!==undefined)d.dm_message=p.dmMessage;if(p.lastPolledAt!==undefined)d.last_polled_at=p.lastPolledAt.toISOString();const q=await db.from('auto_dm_campaigns').update(d).eq('id',id).select('*').single();if(q.error)throw q.error;return q.data}
+export async function recordDmLog(i:any){const q=await db.from('dm_logs').upsert({campaign_id:i.campaignId,recipient_twitter_id:i.recipientTwitterId,reply_text:i.replyText??null,reply_tweet_id:i.replyTweetId??null},{onConflict:'campaign_id,recipient_twitter_id'}).select('*').single();if(q.error)throw q.error;return q.data}
+export async function hasDmBeenSent(campaignId:string,recipientTwitterId:string){const q=await db.from('dm_logs').select('id').eq('campaign_id',campaignId).eq('recipient_twitter_id',recipientTwitterId).maybeSingle();if(q.error)throw q.error;return !!q.data}
+export async function countDmsForCampaign(campaignId:string){const q=await db.from('dm_logs').select('id',{count:'exact',head:true}).eq('campaign_id',campaignId);if(q.error)throw q.error;return q.count??0}
+export async function countTotalDms(){const q=await db.from('dm_logs').select('id',{count:'exact',head:true});if(q.error)throw q.error;return q.count??0}
+export async function countPostsByUser(userId:string){const q=await db.from('scheduled_posts').select('id',{count:'exact',head:true}).eq('user_id',userId);if(q.error)throw q.error;return q.count??0}
+export async function countPostsByUserAndStatus(userId:string,status:string){const q=await db.from('scheduled_posts').select('id',{count:'exact',head:true}).eq('user_id',userId).eq('status',status);if(q.error)throw q.error;return q.count??0}
+export async function countActiveCampaignsByUser(userId:string){const q=await db.from('auto_dm_campaigns').select('id',{count:'exact',head:true}).eq('user_id',userId).eq('is_active',true);if(q.error)throw q.error;return q.count??0}
