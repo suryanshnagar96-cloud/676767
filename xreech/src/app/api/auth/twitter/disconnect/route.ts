@@ -1,0 +1,1 @@
+import{NextResponse}from'next/server';import{deleteTwitterTokenByUserId,getDefaultUser}from'@/lib/supabase';export async function POST(){const u=await getDefaultUser();await deleteTwitterTokenByUserId(u.id);return NextResponse.json({ok:true})}
